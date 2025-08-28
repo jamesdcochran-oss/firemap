@@ -115,3 +115,29 @@
   </script>
 </body>
 </html>
+<script>
+// === Heatmap opacity patch ===
+// run after map + heat layer are created
+(function() {
+  const HEAT_PANE = 'heat-pane';
+  if (map && !map.getPane(HEAT_PANE)) {
+    map.createPane(HEAT_PANE);
+  }
+  // function to set opacity
+  function setHeatOpacity(v) {
+    const p = map.getPane(HEAT_PANE);
+    if (p && p.style) {
+      p.style.opacity = String(Math.max(0, Math.min(1, parseFloat(v)||0)));
+    }
+  }
+  // attach to slider if it exists
+  const opacityEl = document.getElementById('opacity');
+  if (opacityEl) {
+    setHeatOpacity(opacityEl.value || '1');         // initialize
+    opacityEl.addEventListener('input', () => setHeatOpacity(opacityEl.value));
+  } else {
+    setHeatOpacity(1); // fallback: force full opacity
+  }
+})();
+</script>
+
