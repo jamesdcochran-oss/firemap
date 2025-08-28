@@ -1,0 +1,135 @@
+// === Map init ===
+const map = L.map('map').setView([37.2, -77.9], 9);
+
+// Create a dedicated pane so we can control heat opacity reliably
+const HEAT_PANE = 'heat-pane';
+map.createPane(HEAT_PANE);
+map.getPane(HEAT_PANE).style.opacity = '0.7'; // initial opacity matches slider default
+
+// Basemap (OSM) — no key
+let basemapOn = true;
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  crossOrigin: 'anonymous'
+}).addTo(map);
+
+// Heat/Pin state
+let showHeat = true;
+const radiusEl = document.getElementById('radius');
+const opacityEl = document.getElementById('opacity');
+
+// Placeholders
+let flipLon = false;
+// points are [lat, lon, intensity?]
+const points = [];
+// projected keeps intensity too
+const latlngsProjected = [];
+let heat = null;
+const markers = L.layerGroup();
+
+// --- helpers ---
+function setHeatOpacity(v) {
+  // Drive CSS opacity via the pane; value comes as string
+  const pane = map.getPane(HEAT_PANE);
+  if (pane) pane.style.opacity = String(Math.max(0, Math.min(1, parseFloat(v) || 0)));
+}
+
+// Auto longitude sign fix: if most lons are +, assume they should be West (neg)
+function computeAutoFlip(data) {
+  const lons = data.map(p => p[1]).filter(Number.isFinite);
+  const pos = lons.filter(v => v > 0).length;
+  const neg = lons.length - pos;
+  return pos > neg; // true => flip sign
+}
+
+// Keep intensity when projecting
+function project(p) { return [ p[0], flipLon ? -p[1] : p[1], p[2] ]; }
+
+function rebuildLayers() {
+  // rebuild heat (respect intensity and our pane)
+  if (heat) { map.removeLayer(heat); }
+  heat = L.heatLayer(latlngsProjected, {
+    radius: parseInt(radiusEl.value, 10) || 20,
+    blur: 15,
+    maxZoom: 18,
+    pane: HEAT_PANE
+  });
+
+  // rebuild markers
+  markers.clearLayers();
+  latlngsProjected.forEach(p => markers.addLayer(L.circleMarker([p[0], p[1]], {
+    radius: 4, weight: 1, color: '#0ea5e9', fillColor: '#0ea5e9', fillOpacity: 0.8
+  })));
+
+  // add according to state
+  if (showHeat) { map.addLayer(heat); map.removeLayer(markers); }
+  else { map.removeLayer(heat); map.addLayer(markers); }
+}
+
+async function loadGeoJSON(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const gj = await resp.json();
+
+    const pts = [];
+    const bounds = L.latLngBounds();
+    const features = gj.type === 'FeatureCollection' ? gj.features : [];
+
+    for (const f of features) {
+      if (f?.geometry?.type === 'Point' && Array.isArray(f.geometry.coordinates)) {
+        const [lon, lat] = f.geometry.coordinates;
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          const intensity = (f.properties && Number.isFinite(f.properties.intensity)) ? f.properties.intensity : undefined;
+          pts.push([lat, lon, intensity]);
+        }
+      }
+    }
+    if (!pts.length) throw new Error('No Point features were found.');
+
+    // Save points and compute flip
+    points.splice(0, points.length, ...pts);
+    flipLon = computeAutoFlip(points);
+
+    // Build projected latlngs (keep intensity)
+    latlngsProjected.splice(0, latlngsProjected.length, ...points.map(project));
+
+    // Fit bounds (use only lat/lon)
+    latlngsProjected.forEach(p => bounds.extend(L.latLng(p[0], p[1])));
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [20,20] });
+
+    // First render
+    rebuildLayers();
+
+    // Set lon button state
+    document.getElementById('toggleLon').textContent = 'Fix Lon (−): ' + (flipLon ? 'On' : 'Off');
+  } catch (err) {
+    console.error(err);
+    alert('Failed to load GeoJSON. Make sure the file is next to index.html and valid FeatureCollection of Points.');
+  }
+}
+
+// UI handlers (only changes below)
+
+// Radius -> rebuild or setOptions safely
+radiusEl.addEventListener('input', () => {
+  if (heat && heat.setOptions) {
+    heat.setOptions({ radius: parseInt(radiusEl.value, 10) || 20 });
+  } else {
+    rebuildLayers();
+  }
+});
+
+// Opacity -> adjust pane opacity (not an option on leaflet.heat)
+opacityEl.addEventListener('input', () => setHeatOpacity(opacityEl.value));
+
+// Flip lon keeps intensity and rebuilds
+document.getElementById('toggleLon').addEventListener('click', (e) => {
+  flipLon = !flipLon;
+  e.target.textContent = 'Fix Lon (−): ' + (flipLon ? 'On' : 'Off');
+  latlngsProjected.splice(0, latlngsProjected.length, ...points.map(project));
+  rebuildLayers();
+});
+
+// Initialize pane opacity to current slider
+setHeatOpacity(opacityEl.value);
