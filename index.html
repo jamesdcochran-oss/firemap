@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Five Forks Fire Map — Pro (No Key)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet + plugins -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+  <style>
+    :root{
+      --panel: rgba(255,255,255,.95);
+      --muted:#475569;
+    }
+    html, body, #map { height: 100%; margin: 0; padding: 0; font-family: system-ui, Arial, sans-serif; }
+    #topbar {
+      position: absolute; top: 10px; left: 10px; z-index: 1000; background: var(--panel);
+      padding: 10px 12px; border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.12);
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    #side {
+      position: absolute; top: 10px; right: 10px; z-index: 1000; width: min(380px, 92vw); background: var(--panel);
+      padding: 10px 12px; border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.12);
+    }
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:6px 0 }
+    label{ font-size:13px; color:var(--muted) }
+    select, input[type=date], input[type=range], button {
+      padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 8px; background:#fff;
+    }
+    input[type=range]{ width: 150px }
+    button{ cursor:pointer }
+    button:active{ transform: translateY(1px) }
+    .muted{ color:var(--muted); font-size:12px }
+    #stats{ color:var(--muted); font-size:12px }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Top controls -->
+  <div id="topbar">
+    <strong>Leaflet • No API key</strong>
+    <label><input type="checkbox" id="chkHeat" checked> Heatmap</label>
+    <label><input type="checkbox" id="chkClusters" checked> Clusters</label>
+    <label><input type="checkbox" id="chkLabels"> Labels</label>
+    <label>Radius <input id="radius" type="range" min="5" max="60" value="25"></label>
+    <label>Opacity <input id="opacity" type="range" min="0.1" max="1" value="0.7" step="0.05"></label>
+    <button id="btnBasemap">Basemap: On</button>
+    <button id="btnFlip">Fix Lon (−): On</button>
+    <button id="btnZoom">Auto-zoom</button>
+    <button id="btnPNG">Save PNG</button>
+    <span id="stats" class="muted"></span>
+  </div>
+
+  <!-- Side filters -->
+  <div id="side">
+    <div class="row">
+      <label>Cause
+        <select id="causeFilter">
+          <option value="All">All</option>
+          <option>Debris Burning</option>
+          <option>Miscellaneous</option>
+          <option>Equipment Use</option>
+          <option>Lightning</option>
+          <option>Incendiary</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Start <input type="date" id="startDate"></label>
+      <label>End <input type="date" id="endDate"></label>
+      <label>Hours Back <input id="hoursBack" type="range" min="1" max="96" step="1" value="24"></label>
+      <span id="hoursBackVal" class="muted">24</span>
+    </div>
+    <div class="row">
+      <button id="btnExport">Export GeoJSON</button>
+      <button id="btnReset">Reset</button>
+      <span class="muted">Tip: Basemap Off helps PNG export if tiles block CORS.</span>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <script>
+  // === SAMPLE DATA (replace with your real list) ===
+  const fireData = [
+    { lat: 37.36, lng: -78.05, cause: 'Debris Burning', date: '2023-03-10', county: 'Amelia' },
+    { lat: 37.19, lng: -78.20, cause: 'Lightning', date: '2023-05-15', county: 'Dinwiddie' },
+    { lat: 36.89, lng: -77.74, cause: 'Incendiary', date: '2024-07-04', county: 'Brunswick' }
+  ];
+
+  // === MAP INIT ===
+  const map = L.map('map').setView([37.10, -77.62], 9);
+  let basemapOn = true;
+  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution: '&copy; OpenStreetMap contributors', crossOrigin:'anonymous'
+  }).addTo(map);
+
+  const el = id => document.getElementById(id);
+  const rafDebounce = (fn, delay=120) => { let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),delay);} };
+  function setHeatOpacity(val){ const o=Math.max(0.05,Math.min(1,+val||0.7)); const c=heatLayer&&heatLayer._canvas; if(c)c.style.opacity=o; }
+
+  // refs
+  const chkHeat=el('chkHeat'),chkClusters=el('chkClusters'),chkLabels=el('chkLabels');
+  const causeFilter=el('causeFilter'),startDate=el('startDate'),endDate=el('endDate');
+  const rRadius=el('radius'),rOpacity=el('opacity'),rHours=el('hoursBack'),labH=el('hoursBackVal');
+  const btnBasemap=el('btnBasemap'),btnFlip=el('btnFlip'),btnZoom=el('btnZoom'),btnPNG=el('btnPNG');
+  const btnExport=el('btnExport'),btnReset=el('btnReset'),stats=el('stats');
+
+  let flipLon=true; const fixLon=lon=>(flipLon?-Math.abs(lon):lon);
+  function toObj(d){return{lat:+d.lat,lng:fixLon(+d.lng),date:d.date,cause:d.cause||'Unknown',county:d.county||'',prob:d.prob??null,ti4:+(d.bright_ti4??0)}}
+  let records=fireData.map(toObj);
+
+  let clusterGroup=L.markerClusterGroup(); let markers=[];
+  let heatLayer=L.heatLayer([],{
+    radius:+rRadius.value,blur:18,maxZoom:18,
+    gradient:{0.1:'#2c7fb8',0.3:'#41b6c4',0.5:'#a1dab4',0.7:'#fed976',0.9:'#fd8d3c',1.0:'#e31a1c'}
+  }); setHeatOpacity(rOpacity.value);
+
+  function inDateRange(dt){if(!dt)return true;const d=new Date(dt);
+    if(startDate.value&&d<new Date(startDate.value))return false;
+    if(endDate.value&&d>new Date(endDate.value+'T23:59:59'))return false;
+    if(rHours.value){const cut=new Date(Date.now()-(+rHours.value)*3600*1000);if(d<cut)return false;}return true;}
+  function applyFilters(){const c=causeFilter.value;return records.filter(r=>(c==='All'||r.cause===c)&&inDateRange(r.date));}
+
+  function rebuildMarkers(){
+    if(map.hasLayer(clusterGroup))map.removeLayer(clusterGroup);
+    clusterGroup.clearLayers();clusterGroup=L.markerClusterGroup();markers=[];
+    const data=applyFilters();
+    data.forEach(d=>{const m=L.circleMarker([d.lat,d.lng],{radius:6,color:'#ef4444',weight:1.25,fillColor:'#f97316',fillOpacity:0.85})
+      .bindPopup(`<strong>${d.cause}</strong><br>Date: ${d.date||'—'}<br>County: ${d.county||'—'}`);
+      if(chkLabels.checked){const {lat,lng}=m.getLatLng();m.bindTooltip(`${lat.toFixed(4)}, ${lng.toFixed(4)}`,{sticky:true});}
+      markers.push(m);clusterGroup.addLayer(m);});
+    if(chkClusters.checked&&markers.length)map.addLayer(clusterGroup);
+    const causeTxt=causeFilter.value==='All'?'All causes':causeFilter.value;
+    let timeTxt=`${rHours.value}h`;if(startDate.value||endDate.value)timeTxt=`${startDate.value||'…'} → ${endDate.value||'…'}`;
+    stats.textContent=`${data.length} pts • ${causeTxt} • ${timeTxt}`;
+  }
+  function rebuildHeat(){const data=applyFilters();
+    const pts=data.map(d=>{const w=(typeof d.prob==='number')?Math.max(0.1,Math.min(1,d.prob)):(d.ti4?Math.max(0.1,Math.min(1,(d.ti4-300)/100)):0.8);return[d.lat,d.lng,w]});
+    heatLayer.setLatLngs(pts);heatLayer.setOptions({radius:+rRadius.value});setHeatOpacity(rOpacity.value);
+    if(chkHeat.checked&&pts.length&&!map.hasLayer(heatLayer))map.addLayer(heatLayer);
+    if((!chkHeat.checked||!pts.length)&&map.hasLayer(heatLayer))map.removeLayer(heatLayer);}
+  function autoZoom(){const data=applyFilters();if(!data.length)return;
+    const b=L.latLngBounds(data.map(d=>[d.lat,d.lng]));if(b.isValid()){if(b.getNorthEast().equals(b.getSouthWest()))map.setView(b.getCenter(),Math.max(map.getZoom(),11));else map.fitBounds(b.pad(0.2),{animate:false});}}
+
+  const rebuildMarkersDeb=rafDebounce(rebuildMarkers,80);
+  const rebuildHeatDeb=rafDebounce(rebuildHeat,80);
+  const refreshAllDeb=rafDebounce(()=>{rebuildMarkers();rebuildHeat();},80);
+
+  chkClusters.addEventListener('change',()=>{if(chkClusters.checked)map.addLayer(clusterGroup);else map.removeLayer(clusterGroup);});
+  chkHeat.addEventListener('change',rebuildHeatDeb);
+  chkLabels.addEventListener('change',()=>{markers.forEach(m=>chkLabels.checked?m.bindTooltip(`${m.getLatLng().lat.toFixed(4)}, ${m.getLatLng().lng.toFixed(4)}`,{sticky:true}):m.unbindTooltip());});
+  rRadius.addEventListener('input',rebuildHeatDeb);
+  rOpacity.addEventListener('input',()=>setHeatOpacity(rOpacity.value));
+  rHours.addEventListener('input',()=>{labH.textContent=rHours.value;refreshAllDeb();});
+  causeFilter.addEventListener('change',refreshAllDeb);startDate.addEventListener('change',refreshAllDeb);endDate.addEventListener('change',refreshAllDeb);
+
+  btnBasemap.addEventListener('click',()=>{basemapOn=!basemapOn;if(basemapOn){osm.addTo(map);btnBasemap.textContent='Basemap: On';}else{map.removeLayer(osm);btnBasemap.textContent='Basemap: Off';}});
+  btnFlip.addEventListener('click',()=>{flipLon=!flipLon;btnFlip.textContent='Fix Lon (−): '+(flipLon?'On':'Off');records=records.map(r=>({...r,lng:fixLon(Math.abs(r.lng))}));refreshAllDeb();});
+  btnZoom.addEventListener('click',autoZoom);
+  btnPNG.addEventListener('click',async()=>{el('topbar').style.visibility='hidden';el('side').style.visibility='hidden';await new Promise(r=>setTimeout(r,100));
+    html2canvas(document.getElementById('map'),{useCORS:true}).then(c=>{const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='Five_Forks_Map.png';a.click();
+    el('topbar').style.visibility='visible';el('side').style.visibility='visible';}).catch(e=>{alert('PNG failed (tile CORS). Try Basemap: Off.');console.error(e);
+    el('topbar').style.visibility='visible';el('side').style.visibility='visible';});});
+  btnExport.addEventListener('click',()=>{const data=applyFilters().map(d=>({type:'Feature',geometry:{type:'Point',coordinates:[d.lng,d.lat]},properties:{cause:d.cause,date:d.date,county:d.county,prob:d.prob??null}}));
+    const gj={type:'FeatureCollection',features:data};const blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='filtered_points.geojson';a.click();});
+  btnReset.addEventListener('click',()=>{causeFilter.value='All';startDate.value='';endDate.value='';rHours.value=24;labH.textContent='24';chkHeat.checked=true;chkClusters.checked=true;chkLabels.checked=false;
+    flipLon=true;btnFlip.textContent='Fix Lon (−): On';refreshAllDeb();autoZoom();});
+
+  rebuildMarkers();rebuildHeat();autoZoom();
+  </script>
+</body>
+</html>
