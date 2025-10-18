@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "generated_at": "2025-10-15T00:00:00Z"
+  },
+  "counties": {
+    "Amelia": { "hotspots": 3 },
+    "Nottoway": { "hotspots": 5 },
+    "Dinwiddie": { "hotspots": 0 },
+    "Prince George": { "hotspots": 1 },
+    "Brunswick": { "hotspots": 2 },
+    "Greensville": { "hotspots": 0 }
+  }
+}
