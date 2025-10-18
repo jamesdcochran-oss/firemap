@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Fire Weather — Six Counties</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#fff; --text:#0b1224; --muted:#666; --header-bg:#0b1224; --header-text:#e2e8f0;
+    --accent:#f59e0b;
+  }
+  [data-theme="dark"]{
+    --bg:#0b1224; --card:#071023; --text:#e6eef8; --muted:#9fb0c9; --header-bg:#021124; --header-text:#cfe9ff;
+  }
+  body{font-family:system-ui,Arial;margin:0;background:var(--bg);color:var(--text)}
+  header{padding:12px;background:var(--header-bg);color:var(--header-text);display:flex;align-items:center;justify-content:space-between}
+  .wrap{max-width:1100px;margin:12px auto;padding:12px}
+  .controls{display:flex;gap:8px;align-items:center}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .card{padding:10px;border-radius:8px;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+  #map{height:420px;border-radius:8px;margin-bottom:10px}
+  .muted{color:var(--muted);font-size:13px}
+  button{padding:6px 10px;border-radius:6px;border:1px solid rgba(0,0,0,0.08);background:var(--card);cursor:pointer}
+  .header-link { padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.06); background:transparent; color:var(--header-text); text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .header-link.small { font-size:13px; padding:5px 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <div><strong>Fire Weather — Six Counties</strong></div>
+    <div class="controls">
+      <a id="nwsLink" class="header-link small" href="https://www.weather.gov/akq/FIREMAIN" target="_blank" rel="noopener">NWS FIREMAIN</a>
+      <a id="vaLink" class="header-link small" href="https://virginiapro.firesponse.com/public/" target="_blank" rel="noopener">VA Fire Response</a>
+      <button id="windyBtn" class="header-link small" title="Open Windy (new tab)">Windy Map</button>
+
+      <button id="darkToggle" title="Toggle dark mode">🌓</button>
+      <div class="muted">Updated: <span id="lastRun">—</span> ET</div>
+      <button id="refresh" title="Manual refresh">Refresh</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <p class="muted">Hotspot counts come from NASA FIRMS (server polled by GitHub Actions). NWS hourly data is fetched client-side.</p>
+    <div id="map"></div>
+
+    <h3 style="margin-top:12px">Counties</h3>
+    <div id="cards" class="cards"></div>
+
+    <p class="muted">This site is intended to be published with GitHub Pages (serve /docs from main). See README.md for deployment steps.</p>
+  </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="static/main.js"></script>
+<!-- windy_key.js will be created by the action if you set WINDY_KEY secret; otherwise safe to miss -->
+<script src="windy_key.js"></script>
+</body>
+</html>
